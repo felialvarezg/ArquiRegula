@@ -1,0 +1,90 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// =========================================================
+// Base de Conocimiento (RAG - fuente interna)
+// Almacena fragmentos de leyes chilenas (LGUC, OGUC, etc.)
+// =========================================================
+model KnowledgeDocument {
+  id        String   @id @default(cuid())
+  title     String
+  source    String   // ej: "LGUC", "OGUC", "Ley 19.537"
+  article   String   // ej: "Art. 5.3.1", "Art. 116 bis"
+  category  String   // ej: "Regularización", "Permiso", "Recepción"
+  content   String   // texto del artículo/fragmento
+  keywords  String   // palabras clave separadas por coma (para retrieval)
+  url       String?  // enlace oficial si existe
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([category])
+  @@index([source])
+}
+
+// =========================================================
+// Sesiones de conversación con el agente
+// =========================================================
+model ChatSession {
+  id        String         @id @default(cuid())
+  title     String         @default("Nueva consulta")
+  context   String?        // resumen del caso (comuna, tipo de obra, etc.)
+  messages  ChatMessage[]
+  documents GeneratedDocument[]
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+}
+
+model ChatMessage {
+  id         String      @id @default(cuid())
+  sessionId  String
+  session    ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  role       String      // "user" | "assistant" | "system"
+  content    String
+  // Trazabilidad RAG: qué fragmentos se recuperaron para esta respuesta
+  sources    String?     // JSON serializado con ids/títulos de fuentes
+  toolsUsed  String?     // JSON serializado con herramientas usadas (web_search, etc.)
+  createdAt  DateTime    @default(now())
+
+  @@index([sessionId])
+}
+
+// =========================================================
+// Documentos generados por el agente
+// (memoria explicativa, checklist DOM, formularios, etc.)
+// =========================================================
+model GeneratedDocument {
+  id         String      @id @default(cuid())
+  sessionId  String
+  session    ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  type       String      // "memoria_explicativa" | "checklist_dom" | "formulario" | "dictamen"
+  title      String
+  content    String      // documento en markdown
+  metadata   String?     // JSON con datos del caso
+  createdAt  DateTime    @default(now())
+
+  @@index([sessionId])
+}
+
+// =========================================================
+// Fuentes web externas recuperadas (RAG - fuente externa)
+// =========================================================
+model WebSource {
+  id        String   @id @default(cuid())
+  query     String
+  url       String
+  title     String
+  snippet   String
+  hostName  String
+  cachedAt  DateTime @default(now())
+
+  @@index([query])
+}
