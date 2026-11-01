@@ -1,6 +1,7 @@
 /** =========================================================================
-
- * 
+ *  Architecture agent — public API — ArquiRegula Chile
+ *  (Rubric IL2.1 · IL2.4)
+ *
  *  Módulo público que expone la interfaz principal del agente para las APIs
  *  de Next.js:
  *    - `runAgentTurn`          → ejecución de un turno con plan + memoria

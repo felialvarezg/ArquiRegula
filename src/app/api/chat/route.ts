@@ -29,7 +29,7 @@
    } from "@/lib/agent/architecture-agent";
  import type { Flow } from "@/lib/agent/types";
  import { executeTool, getTool } from "@/lib/agent/tool";
- import { synthesizeResponse } from "@/lib/agent/orchestrator";
+import { synthesizeAgentResponse } from "@/lib/agent/orchestrator";
  import { classifyIntent as classifyIntentFn } from "@/lib/agent/planner";
  import { getActiveProvider } from "@/lib/llm";
 import { z } from "zod";
@@ -89,7 +89,7 @@ export async function POST(req: NextRequest) {
     const historyForAgent = history.slice(0, -1);
 
     // 4. Decide cómo ejecutar el agente
-    const runSessionId: string | null = sessionId ?? null;
+    const runSessionId = session.id;
     let result: Awaited<ReturnType<typeof runAgentTurn>>;
     let executedFlowId: FlowId | null = null;
 
@@ -135,16 +135,11 @@ export async function POST(req: NextRequest) {
         sessionId: session.id,
         role: "assistant",
         content: result.response,
-        sources: JSON.stringify(
-          result.sources.map((s) => ({
-            id: s.id,
-            title: s.title,
-            source: s.source,
-            article: s.article,
-            score: s.score,
-            url: s.url,
-          })),
-        ),
+        sources: JSON.stringify({
+          rag: result.sources,
+          web: result.webSources,
+          flowId: executedFlowId,
+        }),
         toolsUsed: JSON.stringify(result.toolsUsed),
       },
     });
@@ -190,8 +185,21 @@ async function executeFlowPlan(
   // Ejecuta correctamente los pasos del flujo, aplicando los mismos
   // mapeos de argumentos que el orquestador de turnos normal.
   const planSteps: Array<{ id: string; result?: string; error?: string }> = [];
+  const sources = new Map<string, Awaited<ReturnType<typeof runAgentTurn>>["sources"][number]>();
+  const webSources = new Map<string, Awaited<ReturnType<typeof runAgentTurn>>["webSources"][number]>();
+  const toolsUsed = new Set<string>();
 
   for (const step of plan.steps) {
+    if (step.tool === "synthesize" || step.tool === "compaction") {
+      step.status = "success";
+      continue;
+    }
+    if (step.tool === "ask_clarify") {
+      step.status = "success";
+      planSteps.push({ id: step.id, result: "¿Podrías compartir los antecedentes que faltan para revisar el caso?" });
+      break;
+    }
+
     const tool = getTool(step.tool as ToolName);
     if (!tool) {
       planSteps.push({ id: step.id, result: `Herramienta no disponible: ${step.tool}` });
@@ -215,6 +223,35 @@ async function executeFlowPlan(
     }
 
     const toolResult = await executeTool(step.tool as ToolName, args);
+    if (toolResult.kind === "json" || Array.isArray(toolResult.data)) {
+      toolsUsed.add(step.tool);
+      if (Array.isArray(toolResult.data)) {
+        for (const item of toolResult.data) {
+          if (!item || typeof item !== "object") continue;
+          const entry = item as Record<string, unknown>;
+          if (typeof entry.id === "string" && typeof entry.title === "string") {
+            sources.set(entry.id, {
+              id: entry.id,
+              title: entry.title,
+              source: typeof entry.source === "string" ? entry.source : "",
+              article: typeof entry.article === "string" ? entry.article : "",
+              category: typeof entry.category === "string" ? entry.category : "",
+              content: typeof entry.preview === "string" ? entry.preview : "",
+              url: typeof entry.url === "string" ? entry.url : null,
+              score: typeof entry.score === "number" ? entry.score : 0,
+            });
+          }
+          if (typeof entry.url === "string" && typeof entry.title === "string" && typeof entry.hostName === "string") {
+            webSources.set(entry.url, {
+              title: entry.title,
+              url: entry.url,
+              snippet: typeof entry.snippet === "string" ? entry.snippet : "",
+              hostName: typeof entry.hostName === "string" ? entry.hostName : "",
+            });
+          }
+        }
+      }
+    }
     planSteps.push({
       id: step.id,
       result: toolResult.content,
@@ -229,19 +266,15 @@ async function executeFlowPlan(
       step.result = toolResult.content;
     }
 
-    // Un paso terminal (sintetizar, aclarar, compactar) finaliza el flujo
-    if ((step.tool === "synthesize" || step.tool === "ask_clarify" || step.tool === "compaction") && step.status === "success") {
-      break;
-    }
   }
 
-  const finalResponse = synthesizeResponse(plan, planSteps);
+  const finalResponse = await synthesizeAgentResponse(plan, planSteps, query, historyForAgent);
 
   return {
     response: finalResponse,
-    sources: [],
-    webSources: [],
-    toolsUsed: Array.from(new Set(planSteps.map((s) => (s.id.includes("tool_") ? s.id : "")))).filter(Boolean),
+    sources: [...sources.values()],
+    webSources: [...webSources.values()],
+    toolsUsed: [...toolsUsed],
     memory: { entries: [], summary: "Flujo ejecutado correctamente." },
     provider: getActiveProvider(),
     decision: { type: "flow" as const, flowId, plan },

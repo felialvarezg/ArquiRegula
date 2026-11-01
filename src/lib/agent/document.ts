@@ -1,5 +1,7 @@
 /** =========================================================================
-
+ *  Standalone document generator — ArquiRegula Chile
+ *  (Rubric IL2.1 · IL2.4)
+ *
  *  Genera documentos formales de regularización de obras (Markdown) usando
  *  RAG + LLM. Es reutilizable por:
  *    - La herramienta `generate_document` del kit de herramientas del agente

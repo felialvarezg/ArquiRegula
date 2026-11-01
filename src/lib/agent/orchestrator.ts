@@ -1,5 +1,7 @@
 /** =========================================================================
- * 
+ *  Orchestrator — agente completo — ArquiRegula Chile
+ *  (Rubric IL2.1 · IL2.2 · IL2.3)
+ *
  *  Flujo de un turno:
  *    1. Recupera/navega contexto (ventana corta + resumen de sesión + memoria).
  *    2. Planifica (planificador → paso ordenado).
@@ -168,6 +170,11 @@ export async function runAgentTurn(
   const state = ensureState(sessionId);
   const d = getDeps();
 
+  // Rehydrate the short-term context after a server restart or a new worker.
+  if (state.context.recentMessages.length === 0 && previousMessages.length > 0) {
+    state.context.recentMessages = previousMessages.slice(-SHORT_TERM_MAX_MESSAGES).map((message) => ({ ...message }));
+  }
+
   // 1. Actualizar historial corto
   state.context.recentMessages.push({ role: "user", content: query, toolCalls: ["user"] });
   state.context.currentTurn += 1;
@@ -185,6 +192,7 @@ export async function runAgentTurn(
   if (planDecision.type === "clarify") {
     const response = `💡 ${planDecision.question}`;
     d.memory.remember(response, "feedback", sessionId, { source: "clarification_prompt" });
+    state.context.recentMessages.push({ role: "assistant", content: response });
     return {
       response,
       sources: [],
@@ -227,6 +235,7 @@ export async function runAgentTurn(
     state.context.lastPlan = plan;
 
     const planSteps: Array<{ id: string; result?: string; error?: string }> = [];
+    const toolResults: ToolResult[] = [];
 
     for (const step of plan.steps) {
       // Actualiza estado del plan en el contexto
@@ -234,7 +243,18 @@ export async function runAgentTurn(
         state.context.lastPlan.steps = plan.steps.map((s) => ({ ...s }));
       }
 
+      if (step.tool === "synthesize" || step.tool === "compaction") {
+        step.status = "success";
+        continue;
+      }
+      if (step.tool === "ask_clarify") {
+        step.status = "success";
+        planSteps.push({ id: step.id, result: "¿Podrías compartir los antecedentes que faltan para revisar el caso?" });
+        break;
+      }
+
       const toolResult = await executeToolStep(step, query, sessionId, d);
+      toolResults.push(toolResult);
       planSteps.push({ id: step.id, result: toolResult.content, error: toolResult.kind === "text" && toolResult.content.includes("Error") ? toolResult.content : undefined });
 
       if (toolResult.kind === "text" && toolResult.content.includes("Error")) {
@@ -260,9 +280,6 @@ export async function runAgentTurn(
       }
 
       // Si es un paso terminal (sintetizar, aclarar, compactar), finalizar
-      if ((step.tool === "synthesize" || step.tool === "ask_clarify" || step.tool === "compaction") && step.status === "success") {
-        break;
-      }
     }
 
     if (state.context.lastPlan) {
@@ -283,7 +300,8 @@ export async function runAgentTurn(
     }
 
     // 5. Síntesis final: responder al usuario
-    const finalResponse = synthesizeResponse(plan, planSteps);
+    const finalResponse = await synthesizeAgentResponse(plan, planSteps, query, state.context.recentMessages.slice(0, -1));
+    state.context.recentMessages.push({ role: "assistant", content: finalResponse });
 
     // 6. Compactar contexto si corresponde (continuidad)
     if (state.context.currentTurn >= state.context.maxTurnsBeforeCompaction) {
@@ -308,9 +326,9 @@ export async function runAgentTurn(
 
     return {
       response: finalResponse,
-      sources: [],
-      webSources: [],
-      toolsUsed: Array.from(new Set(planSteps.map((s) => (s.id.includes("tool_") ? s.id : "")))).filter(Boolean),
+      sources: collectKnowledgeSources(toolResults),
+      webSources: collectWebSources(toolResults),
+      toolsUsed: Array.from(new Set(plan.steps.filter((step) => step.status === "success" && !["synthesize", "ask_clarify", "compaction"].includes(step.tool)).map((step) => step.tool))),
       memory: {
         entries: state.context.longTermMemory,
         summary: planSteps.find((s) => s.id === "compaction")?.result ?? "Sin resumen compactado este turno.",
@@ -326,6 +344,7 @@ export async function runAgentTurn(
   state.context.lastPlan = plan;
 
   const planSteps: Array<{ id: string; result?: string; error?: string }> = [];
+  const toolResults: ToolResult[] = [];
 
   for (const step of plan.steps) {
     // Actualiza estado del plan en el contexto
@@ -333,7 +352,18 @@ export async function runAgentTurn(
       state.context.lastPlan.steps = plan.steps.map((s) => ({ ...s }));
     }
 
+    if (step.tool === "synthesize" || step.tool === "compaction") {
+      step.status = "success";
+      continue;
+    }
+    if (step.tool === "ask_clarify") {
+      step.status = "success";
+      planSteps.push({ id: step.id, result: "¿Podrías compartir los antecedentes que faltan para revisar el caso?" });
+      break;
+    }
+
     const toolResult = await executeToolStep(step, query, sessionId, d);
+    toolResults.push(toolResult);
     planSteps.push({ id: step.id, result: toolResult.content, error: toolResult.kind === "text" && toolResult.content.includes("Error") ? toolResult.content : undefined });
 
     if (toolResult.kind === "text" && toolResult.content.includes("Error")) {
@@ -359,9 +389,6 @@ export async function runAgentTurn(
     }
 
     // Si es un paso terminal (sintetizar, aclarar, compactar), finalizar
-    if ((step.tool === "synthesize" || step.tool === "ask_clarify" || step.tool === "compaction") && step.status === "success") {
-      break;
-    }
   }
 
   if (state.context.lastPlan) {
@@ -382,7 +409,7 @@ export async function runAgentTurn(
   }
 
   // 5. Síntesis final: responder al usuario
-  const finalResponse = synthesizeResponse(plan, planSteps);
+  const finalResponse = await synthesizeAgentResponse(plan, planSteps, query, state.context.recentMessages.slice(0, -1));
 
   // 6. Compactar contexto si corresponde (continuidad)
   if (state.context.currentTurn >= state.context.maxTurnsBeforeCompaction) {
@@ -405,13 +432,13 @@ export async function runAgentTurn(
     }
   }
 
+  state.context.recentMessages.push({ role: "assistant", content: finalResponse });
+
   return {
     response: finalResponse,
-    sources: [],
-    webSources: [],
-    toolsUsed: Array.from(
-      new Set(planSteps.map((s) => (s.id.includes("tool_") ? s.id : ""))),
-    ).filter(Boolean),
+    sources: collectKnowledgeSources(toolResults),
+    webSources: collectWebSources(toolResults),
+    toolsUsed: Array.from(new Set(plan.steps.filter((step) => step.status === "success" && !new Set<string>(["synthesize", "ask_clarify", "compaction"]).has(step.tool)).map((step) => step.tool))),
     memory: {
       entries: state.context.longTermMemory,
       summary: planSteps.find((s) => s.id === "compaction")?.result ?? "Sin resumen compactado este turno.",
@@ -419,6 +446,48 @@ export async function runAgentTurn(
     provider: d.provider(),
     decision: { type: "plan" as const, plan },
   };
+}
+
+function collectKnowledgeSources(results: ToolResult[]): AgentTurnResult["sources"] {
+  const sources = results.flatMap((result) => Array.isArray(result.data) ? result.data : []);
+  const unique = new Map<string, AgentTurnResult["sources"][number]>();
+
+  for (const source of sources) {
+    if (!source || typeof source !== "object") continue;
+    const item = source as Record<string, unknown>;
+    if (typeof item.id !== "string" || typeof item.title !== "string") continue;
+    unique.set(item.id, {
+      id: item.id,
+      title: item.title,
+      source: typeof item.source === "string" ? item.source : "",
+      article: typeof item.article === "string" ? item.article : "",
+      category: typeof item.category === "string" ? item.category : "",
+      content: typeof item.preview === "string" ? item.preview : typeof item.content === "string" ? item.content : "",
+      url: typeof item.url === "string" ? item.url : null,
+      score: typeof item.score === "number" ? item.score : 0,
+    });
+  }
+
+  return [...unique.values()];
+}
+
+function collectWebSources(results: ToolResult[]): AgentTurnResult["webSources"] {
+  const sources = results.flatMap((result) => Array.isArray(result.data) ? result.data : []);
+  const unique = new Map<string, AgentTurnResult["webSources"][number]>();
+
+  for (const source of sources) {
+    if (!source || typeof source !== "object") continue;
+    const item = source as Record<string, unknown>;
+    if (typeof item.url !== "string" || typeof item.title !== "string" || typeof item.hostName !== "string") continue;
+    unique.set(item.url, {
+      title: item.title,
+      url: item.url,
+      snippet: typeof item.snippet === "string" ? item.snippet : "",
+      hostName: typeof item.hostName === "string" ? item.hostName : "",
+    });
+  }
+
+  return [...unique.values()];
 }
 
 // ---------------------------------------------------------------------------
@@ -446,6 +515,42 @@ function synthesizeResponse(plan: Plan, planSteps: Array<{ id: string; result?: 
   }
 
   return lines.join("\n");
+}
+
+/** Convierte resultados de herramientas en una respuesta útil y fundamentada. */
+export async function synthesizeAgentResponse(
+  plan: Plan,
+  planSteps: Array<{ id: string; result?: string; error?: string }>,
+  query: string,
+  history: Array<{ role: "user" | "assistant"; content: string }> = [],
+): Promise<string> {
+  const fallback = synthesizeResponse(plan, planSteps);
+  const evidence = planSteps
+    .filter((step) => step.result && !step.result.includes("Error"))
+    .map((step) => `${step.id}: ${step.result}`)
+    .join("\n\n")
+    .slice(0, 14000);
+
+  if (!evidence.trim()) return fallback;
+
+  try {
+    const llm = await getLLM();
+    const previousContext = history.slice(-8).map((message) => `${message.role}: ${message.content}`).join("\n").slice(0, 5000);
+    const completion = await llm.createChatCompletion([
+      {
+        role: "system",
+        content: "Eres ArquiRegula, un asistente técnico para regularización de edificaciones en Chile. Responde en español claro y práctico. Usa primero los antecedentes recuperados; distingue hechos de inferencias, no inventes artículos ni requisitos, cita la fuente y el artículo solo cuando aparezcan en los antecedentes. Si la evidencia no alcanza, dilo y pregunta qué dato falta. No muestres JSON ni pasos internos del agente.",
+      },
+      {
+        role: "user",
+        content: `Conversación reciente:\n${previousContext || "Sin mensajes anteriores."}\n\nConsulta actual:\n${query}\n\nAntecedentes recuperados por las herramientas:\n${evidence}\n\nEntrega una respuesta directa, organizada y accionable.`,
+      },
+    ]);
+    return completion.content.trim() || fallback;
+  } catch (error) {
+    console.warn("[agent synthesis] Se usó la respuesta de respaldo:", error instanceof Error ? error.message : error);
+    return fallback;
+  }
 }
 
 // ---------------------------------------------------------------------------

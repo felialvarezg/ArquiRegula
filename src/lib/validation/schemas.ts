@@ -3,7 +3,8 @@
  * Usa `zod` (v4) para garantiar que los datos que llegan al LLM/router
  * tengan la forma esperada, evitando errores en el pipeline.
  *
-
+ * Instalación: ya está en `package.json` (deps `zod@^4.0.2`), no requiere
+ * agregar paquetes.
  */
 import { z } from "zod";
 

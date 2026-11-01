@@ -1,4 +1,6 @@
 /** =========================================================================
+ *  MemoryManager — corto y largo plazo — ArquiRegula Chile
+ *  (Rubric IL2.2)
  *
  *  Diseño de memoria:
  *    - CORTO PLAZO (working memory): ventana deslizante de mensajes recientes

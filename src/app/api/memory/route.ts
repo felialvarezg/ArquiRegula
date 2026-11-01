@@ -1,5 +1,7 @@
 /** =========================================================================
- 
+ *  API: gestión de memoria (memory management) — ArquiRegula Chile
+ *  (Rubric IL2.2)
+ *
  *  Endpoints:
  *    GET    /api/memory               -> lista memoria global
  *    POST   /api/memory               -> guarda un hecho (episodic/case/preference/summary/feedback)
@@ -80,3 +82,7 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+
+// ---------------------------------------------------------------------------
+// Fin del módulo
+// ---------------------------------------------------------------------------

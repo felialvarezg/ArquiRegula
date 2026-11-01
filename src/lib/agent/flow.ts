@@ -1,5 +1,7 @@
 /** =========================================================================
- * 
+ *  Flow system — nuevos flujos de trabajo arquitectónicos y de regulación
+ *  del campo para ArquiRegula Chile.
+ *
  *  Cobertura:
  *    - Dictamen previo / informe técnico
  *    - Checklist de supervisión técnica

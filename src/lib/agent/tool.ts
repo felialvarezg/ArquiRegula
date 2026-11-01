@@ -124,7 +124,7 @@ ${text}`;
 }
 
 // ---------------------------------------------------------------------------
-// Memory herramientas 
+// Memory herramientas (illas IL2.2)
 // ---------------------------------------------------------------------------
 
 /**
@@ -207,6 +207,7 @@ export const BUILTIN_TOOLS: Tool[] = [
           source: r.source,
           article: r.article,
           category: r.category,
+          url: r.url,
           score: r.score,
           preview: r.content.slice(0, 400),
         }));
@@ -238,7 +239,7 @@ export const BUILTIN_TOOLS: Tool[] = [
     async execute(args: { query: string; num?: number }): Promise<ToolResult> {
       try {
         const results = await toolWebSearch(args.query, args.num ?? 4);
-        const data = results.map((r) => ({ title: r.title, url: r.url, hostName: r.hostName }));
+        const data = results.map((r) => ({ title: r.title, url: r.url, snippet: r.snippet, hostName: r.hostName }));
         return {
           content: JSON.stringify({ count: data.length, results: data }, null, 2),
           kind: "json",
@@ -367,6 +368,40 @@ export const BUILTIN_TOOLS: Tool[] = [
       } catch (err) {
         return {
           content: `Error en recall: ${(err as Error).message}`,
+          kind: "text",
+        };
+      }
+    },
+  },
+  {
+    name: "search_memory",
+    description: "Busca recuerdos de la sesión que coinciden con la consulta del caso.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Términos que describen el antecedente a recuperar" },
+        sessionId: { type: "string", description: "Id de la sesión" },
+      },
+      required: ["query"],
+    },
+    async execute(args: { query: string; sessionId?: string }): Promise<ToolResult> {
+      try {
+        const entries = await toolRecall(args.query, args.sessionId ?? null);
+        const terms = args.query.toLocaleLowerCase("es").match(/[\p{L}\p{N}]{3,}/gu) ?? [];
+        const ranked = entries
+          .map((entry) => ({ ...entry, matches: terms.filter((term) => entry.content.toLocaleLowerCase("es").includes(term)).length }))
+          .filter((entry) => terms.length === 0 || entry.matches > 0)
+          .sort((a, b) => b.matches - a.matches)
+          .slice(0, 5)
+          .map(({ content, kind }) => ({ content, kind }));
+        return {
+          content: JSON.stringify({ count: ranked.length, results: ranked }, null, 2),
+          kind: "json",
+          data: ranked,
+        };
+      } catch (err) {
+        return {
+          content: `Error en search_memory: ${(err as Error).message}`,
           kind: "text",
         };
       }

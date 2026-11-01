@@ -1,5 +1,6 @@
 /** =========================================================================
-
+ *  Agent type definitions — ArquiRegula Chile
+ *  (Rubric IL2.1 · IL2.2 · IL2.3)
  *
  *  Core interfaces for the agent framework:
  *    - Tools (query / writing / reasoning / memory / planning)
@@ -23,14 +24,14 @@ export type ToolName =
   | "recall"          // Recuperación de memoria a largo plazo
   | "search_memory";  // Recuperación híbrida (caso + preferencias)
 
-/** Fragmento de esquema JSON que describe los parametros de una herramienta. */
+/** JSON Schema fragment describing the parameters of a tool. */
 export interface ToolInputSchema {
   type: "object";
   properties: Record<string, { type: string; description: string; default?: unknown }>;
   required: string[];
 }
 
-/** Llamada a una herramienta con su esquema de parametros y la ejecucion de funcion. */
+/** A callable tool with a typed schema and an execution function. */
 export interface Tool {
   readonly name: ToolName;
   readonly description: string;
@@ -38,14 +39,14 @@ export interface Tool {
   execute(args: Record<string, unknown>): Promise<ToolResult>;
 }
 
-/** Resultado retornado de la ejecucion de una herramienta */
+/** Result returned by any tool execution. */
 export interface ToolResult {
   readonly content: string; // texto visible (respuesta o detalle)
   readonly kind?: "text" | "json"; // para serialización
   readonly data?: unknown; // artefacto (markdown, fetch, etc.)
 }
 
-/** Un paso parte de un plan multi-pasos */
+/** A single step of a multi-stage plan. */
 export interface PlanStep {
   id: string;
   tool: ToolName | "synthesize" | "ask_clarify" | "compaction";
@@ -56,7 +57,7 @@ export interface PlanStep {
   error?: string;
 }
 
-/** Un plan completo con sus pasos ordenados y estados de ciclo de vida. */
+/** A complete plan with ordered steps and lifecycle state. */
 export interface Plan {
   id: string;
   sessionId: string | null;
@@ -67,7 +68,7 @@ export interface Plan {
   updatedAt: string;
 }
 
-/** Tipo de memoria para almacenar en la memoria de largo plazo . */
+/** Kind of stored long-term memory. */
 export type MemoryKind =
   | "episodic" // hechos extraídos de la conversación
   | "case"     // datos del caso (propietario, comuna, obra...)
@@ -84,7 +85,7 @@ export interface MemoryEntry {
   createdAt: string;
 }
 
-/** Estado de agente activo mas memoria a corto y largo plazo  */
+/** Active agent state: short-term context (history) + long-term memory. */
 export interface AgentContext {
   sessionId: string | null;
   currentTurn: number;
@@ -101,7 +102,7 @@ export interface AgentContext {
   toolsUsed: string[];
 }
 
-/** Desicion tomada por el planner en un turno dado. */
+/** Decision taken by the planner at a given turn. */
 export type AgentAction =
   | { type: "plan"; plan: Plan }
   | { type: "execute_tool"; tool: ToolName; args: Record<string, unknown>; stepId: string }
@@ -111,7 +112,7 @@ export type AgentAction =
   | { type: "stop" }
   | { type: "flow"; flowId: FlowId; plan: Plan };
 
-/** Resultado del turno completo de un agente. */
+/** Result of a full agent turn (rinde la IL2.2 + IL2.3). */
 export interface AgentTurnResult {
   response: string;
   sources: RetrievedChunk[];
@@ -124,6 +125,8 @@ export interface AgentTurnResult {
   provider: string;
   decision: AgentAction;
 }
+
+/** Identificador de un flujo de trabajo arquitectónico o de regulación del campo. */
 
 /** Identificador de un flujo de trabajo arquitectónico o de regulación del campo. */
 export type FlowId =
