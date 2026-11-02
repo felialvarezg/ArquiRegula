@@ -1,7 +1,7 @@
 /**
  * Prompts optimizados para el Agente de Arquitectura - ArquiRegula Chile.
  *
- * (Indicador de Logro IL1.1 - Formulación de prompts)
+
  *
  * Justificación del diseño del prompt:
  *  - Rol experto: acota el dominio (arquitectura + derecho administrativo chileno)

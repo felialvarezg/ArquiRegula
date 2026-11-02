@@ -10,10 +10,21 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// =========================================================
-// Base de Conocimiento (RAG - fuente interna)
-// Almacena fragmentos de leyes chilenas (LGUC, OGUC, etc.)
-// =========================================================
+// =========================================================================
+// Base de conocimiento + memoria (RAG, ChatSession, ChatMessage,
+// GeneratedDocument, WebSource, MemoryEntry)
+// =========================================================================
+model MemoryEntry {
+  id         String   @id @default(cuid())
+  sessionId  String?  @map("session_id")
+  kind       String   // "episodic" | "case" | "preference" | "summary" | "feedback"
+  content    String
+  metadata   String?  // JSON serializado con metadatos
+  createdAt  DateTime @default(now())
+
+  @@index([sessionId, kind])
+  @@index([createdAt])
+}
 model KnowledgeDocument {
   id        String   @id @default(cuid())
   title     String

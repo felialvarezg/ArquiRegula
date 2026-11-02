@@ -22,6 +22,8 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { z } from "zod";
+import { GenerateDocumentBodySchema } from "@/lib/validation/schemas";
 import { generateRegularizationDocument } from "@/lib/agent/architecture-agent";
 import { DOCUMENT_TYPES, type DocumentType } from "@/lib/rag/prompts";
 
@@ -30,31 +32,26 @@ export const runtime = "nodejs";
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => null);
-    if (!body?.type || !body?.caseData) {
+    const parsed = GenerateDocumentBodySchema.safeParse(body);
+    if (!parsed.success) {
       return NextResponse.json(
-        { error: "Se requieren 'type' y 'caseData'" },
+        { error: "Datos inválidos en el cuerpo de la petición", details: parsed.error.flatten() },
         { status: 400 },
       );
     }
 
-    const type = body.type as DocumentType;
-    if (!DOCUMENT_TYPES[type]) {
-      return NextResponse.json(
-        { error: `Tipo de documento inválido. Válidos: ${Object.keys(DOCUMENT_TYPES).join(", ")}` },
-        { status: 400 },
-      );
-    }
+    const { type: docType, caseData } = parsed.data;
 
     // Serializa los datos del caso en texto legible para el LLM
-    const caseData = objectToCaseText(body.caseData);
+    const caseDataText = objectToCaseText(caseData ?? {});
 
     const { content, sources } = await generateRegularizationDocument({
-      docType: type,
-      docLabel: DOCUMENT_TYPES[type].label,
-      caseData,
+      docType: docType,
+      docLabel: DOCUMENT_TYPES[docType].label,
+      caseData: caseDataText,
     });
 
-    const title = DOCUMENT_TYPES[type].label;
+    const title = DOCUMENT_TYPES[docType].label;
 
     // Persiste el documento si hay sesión
     let sessionId = body.sessionId as string | undefined;
@@ -62,24 +59,24 @@ export async function POST(req: NextRequest) {
       const created = await db.generatedDocument.create({
         data: {
           sessionId,
-          type,
+          type: docType,
           title,
           content,
-          metadata: JSON.stringify(body.caseData),
+          metadata: JSON.stringify(caseData ?? {}),
         },
       });
       return NextResponse.json({
         document: created,
         sources,
-        type,
+        type: docType,
         label: title,
       });
     }
 
     return NextResponse.json({
-      document: { title, content, type },
+      document: { title, content, type: docType },
       sources,
-      type,
+      type: docType,
       label: title,
     });
   } catch (err) {

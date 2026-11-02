@@ -42,7 +42,7 @@ export interface RetrievedChunk {
 }
 
 /** Normaliza texto: minúsculas, sin acentos, sin signos. */
-function normalize(text: string): string {
+export function normalize(text: string): string {
   return text
     .toLowerCase()
     .normalize("NFD")
@@ -53,7 +53,7 @@ function normalize(text: string): string {
 }
 
 /** Tokeniza eliminando stopwords. */
-function tokenize(text: string): string[] {
+export function tokenize(text: string): string[] {
   const normalized = normalize(text);
   return normalized
     .split(" ")

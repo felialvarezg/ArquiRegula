@@ -78,7 +78,7 @@ async function runChatDemo() {
     console.log(`  Consulta: "${t.query}"\n`);
 
     const start = Date.now();
-    const result = await runAgentTurn(t.query, []);
+    const result = await runAgentTurn(t.query, null);
     const elapsed = ((Date.now() - start) / 1000).toFixed(2);
 
     // Respuesta
@@ -167,6 +167,7 @@ async function main() {
   try {
     await runChatDemo();
     await runDocumentDemo();
+    await runMemoryDemo();
     header("DEMOSTRACIÓN COMPLETADA");
     console.log(
       "  Todas las pruebas pasaron. El agente responde con trazabilidad\n" +
@@ -177,6 +178,51 @@ async function main() {
     console.error("\n✗ Error en la demostración:", err);
     process.exit(1);
   }
+}
+
+// =========================================================================
+// Memoria a largo plazo (IL2.2) — demostración opcional
+// =========================================================================
+async function runMemoryDemo() {
+  const MEMORY_API = "http://localhost:3000/api/memory";
+  const SESSION_API = "http://localhost:3000/api/sessions/1/memory";
+  console.log("\n" + "═".repeat(60));
+  console.log("  DEMOCRACIÓN — Memoria a largo plazo (IL2.2)");
+  console.log("═".repeat(60));
+
+  console.log("\n  ✏️  Guardando un hecho en memoria...");
+  const save = await fetch(MEMORY_API, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      content: "Caso 1: Ampliación de vivienda sin permiso, comuna de Ñuñoa, 45 m².",
+      kind: "case",
+      metadata: { source: "demo_agent", turn: 1 },
+    }),
+  });
+  const saved = await save.json();
+  console.log(`  ✓ Hecho guardado: id=${saved.entry.id} (kind=${saved.entry.kind})`);
+
+  console.log("  🔍 Recuperando hechos de la sesión...");
+  const recall = await fetch(SESSION_API, { method: "GET" });
+  const recallData = await recall.json();
+  const caseFound = (recallData.entries as any[]).some((e) => e.kind === "case");
+  console.log(`  ✓ Recuperados ${recallData.count} hechos; caso encontrado: ${caseFound}`);
+
+  console.log("  💬 Consulta que referencia el caso guardado:");
+  const chat = await fetch("http://localhost:3000/api/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      message: "Recuerdo el caso de Ñuñoa: 45 m². ¿Qué documentos necesito?",
+      sessionId: "1",
+    }),
+  });
+  const chatData = await chat.json();
+  console.log(`  ✓ Respuesta: ${chatData.response.slice(0, 120)}…`);
+  console.log(`  💡 Herramientas usadas: ${chatData.toolsUsed.join(", ")}`);
+
+  console.log("═".repeat(60) + "\n");
 }
 
 main();

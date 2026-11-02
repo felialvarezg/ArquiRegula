@@ -12,6 +12,7 @@
  * Ejecutar con: bun run db:seed
  */
 import { db } from "../src/lib/db";
+import type { MemoryKind } from "../src/lib/agent/types";
 
 interface SeedDoc {
   title: string;
@@ -316,6 +317,43 @@ async function main() {
 
   const count = await db.knowledgeDocument.count();
   console.log(`✓ Base de conocimiento poblada con ${count} documentos.`);
+
+  // ---------------------------------------------------------------------------
+  // Sembrar memoria a largo plazo (IL2.2)
+  // ---------------------------------------------------------------------------
+  await seedMemory();
+}
+
+/** Sembra de hechos de ejemplo en memoria a largo plazo. */
+async function seedMemory() {
+  const cases = [
+    {
+      content: "Caso 1 — Ampliación de vivienda sin permiso, comuna de Ñuñoa, superficie 45 m². Propietario: María González Pérez.",
+      kind: "case",
+      metadata: { source: "demo_case", turn: 1 },
+    },
+    {
+      content: "El usuario prefiere explicaciones paso a paso y revisa siempre la normativa citada antes de firmar el documento final.",
+      kind: "preference",
+      metadata: { source: "demo_case", turn: 1 },
+    },
+    {
+      content: "Antes de generar la memoria explicativa se deben citar LGUC Art. 116 bis y OGUC Art. 5.3.1.",
+      kind: "summary",
+      metadata: { source: "demo_session", turn: 1 },
+    },
+  ];
+
+  const memory = await db.memoryEntry.createMany({
+    data: cases.map((c) => ({
+      sessionId: null,
+      kind: c.kind as MemoryKind,
+      content: c.content,
+      metadata: JSON.stringify(c.metadata),
+    })),
+  });
+
+  console.log(`✓ Memoria a largo plazo sembrada con ${memory.count} hechos de ejemplo.`);
 }
 
 main()
